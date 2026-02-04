@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import { Client, Account, Databases, Storage, ID, Query } from "appwrite";
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -44,7 +45,43 @@ function volumeFromGeometryMm3(geometry) {
   return Math.abs(volume / 6);
 }
 
+const client = new Client()
+  .setEndpoint(import.meta.env.VITE_APPWRITE_ENDPOINT || "")
+  .setProject(import.meta.env.VITE_APPWRITE_PROJECT_ID || "");
+
+const account = new Account(client);
+const databases = new Databases(client);
+const storage = new Storage(client);
+
+const databaseId = import.meta.env.VITE_APPWRITE_DATABASE_ID || "";
+const printersCollectionId =
+  import.meta.env.VITE_APPWRITE_PRINTERS_COLLECTION_ID || "";
+const resinsCollectionId =
+  import.meta.env.VITE_APPWRITE_RESINS_COLLECTION_ID || "";
+const uploadsCollectionId =
+  import.meta.env.VITE_APPWRITE_UPLOADS_COLLECTION_ID || "";
+const bucketId = import.meta.env.VITE_APPWRITE_BUCKET_ID || "";
+
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMode, setAuthMode] = useState("signin");
+  const [statusMessage, setStatusMessage] = useState("");
+  const [printers, setPrinters] = useState([]);
+  const [resins, setResins] = useState([]);
+  const [uploads, setUploads] = useState([]);
+  const [newPrinter, setNewPrinter] = useState({
+    name: "",
+    model: "",
+    notes: "",
+  });
+  const [newResin, setNewResin] = useState({
+    brand: "",
+    model: "",
+    pricePerLiter: 200,
+  });
+  const [selectedResinId, setSelectedResinId] = useState("");
   const [location, setLocation] = useState("");
   const [printer, setPrinter] = useState("");
   const [resin, setResin] = useState("");
@@ -52,6 +89,52 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    async function getUser() {
+      try {
+        const accountInfo = await account.get();
+        setUser(accountInfo);
+      } catch (error) {
+        setUser(null);
+      }
+    }
+
+    getUser();
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setPrinters([]);
+      setResins([]);
+      setUploads([]);
+      return;
+    }
+
+    async function loadData() {
+      try {
+        const [printersData, resinsData, uploadsData] = await Promise.all([
+          databases.listDocuments(databaseId, printersCollectionId, [
+            Query.orderDesc("$createdAt"),
+          ]),
+          databases.listDocuments(databaseId, resinsCollectionId, [
+            Query.orderDesc("$createdAt"),
+          ]),
+          databases.listDocuments(databaseId, uploadsCollectionId, [
+            Query.orderDesc("$createdAt"),
+          ]),
+        ]);
+
+        setPrinters(printersData.documents ?? []);
+        setResins(resinsData.documents ?? []);
+        setUploads(uploadsData.documents ?? []);
+      } catch (error) {
+        setStatusMessage(error.message || "Could not load data.");
+      }
+    }
+
+    loadData();
+  }, [user]);
 
   useEffect(() => {
     if (!files.length) {
@@ -94,6 +177,14 @@ export default function App() {
 
   const pricePerMl = pricePerLiter / 1000;
 
+  useEffect(() => {
+    if (!selectedResinId) return;
+    const resinItem = resins.find((item) => item.$id === selectedResinId);
+    if (resinItem?.price_per_liter) {
+      setPricePerLiter(Number(resinItem.price_per_liter));
+    }
+  }, [resins, selectedResinId]);
+
   const enrichedResults = useMemo(() => {
     return results.map((result) => {
       if (result.error) return result;
@@ -120,6 +211,143 @@ export default function App() {
     );
   }, [enrichedResults]);
 
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    setStatusMessage("");
+    if (!authEmail || !authPassword) {
+      setStatusMessage("Email and password are required.");
+      return;
+    }
+
+    if (authMode === "signin") {
+      try {
+        await account.createEmailPasswordSession(authEmail, authPassword);
+        const accountInfo = await account.get();
+        setUser(accountInfo);
+      } catch (error) {
+        setStatusMessage(error.message || "Could not sign in.");
+      }
+      return;
+    }
+
+    try {
+      await account.create(ID.unique(), authEmail, authPassword);
+      await account.createEmailPasswordSession(authEmail, authPassword);
+      const accountInfo = await account.get();
+      setUser(accountInfo);
+    } catch (error) {
+      setStatusMessage(error.message || "Could not create account.");
+    }
+  }
+
+  async function handleSignOut() {
+    await account.deleteSession("current");
+    setUser(null);
+    setStatusMessage("");
+  }
+
+  async function handleAddPrinter(event) {
+    event.preventDefault();
+    if (!newPrinter.name || !newPrinter.model) {
+      setStatusMessage("Printer name and model are required.");
+      return;
+    }
+    try {
+      await databases.createDocument(
+        databaseId,
+        printersCollectionId,
+        ID.unique(),
+        {
+          name: newPrinter.name,
+          model: newPrinter.model,
+          notes: newPrinter.notes,
+        }
+      );
+      setNewPrinter({ name: "", model: "", notes: "" });
+      setStatusMessage("Printer saved.");
+      const data = await databases.listDocuments(
+        databaseId,
+        printersCollectionId,
+        [Query.orderDesc("$createdAt")]
+      );
+      setPrinters(data.documents ?? []);
+    } catch (error) {
+      setStatusMessage(error.message || "Could not save printer.");
+    }
+  }
+
+  async function handleAddResin(event) {
+    event.preventDefault();
+    if (!newResin.brand || !newResin.model) {
+      setStatusMessage("Resin brand and model are required.");
+      return;
+    }
+    try {
+      await databases.createDocument(
+        databaseId,
+        resinsCollectionId,
+        ID.unique(),
+        {
+          brand: newResin.brand,
+          model: newResin.model,
+          price_per_liter: newResin.pricePerLiter,
+        }
+      );
+      setNewResin({ brand: "", model: "", pricePerLiter: 200 });
+      setStatusMessage("Resin saved.");
+      const data = await databases.listDocuments(
+        databaseId,
+        resinsCollectionId,
+        [Query.orderDesc("$createdAt")]
+      );
+      setResins(data.documents ?? []);
+    } catch (error) {
+      setStatusMessage(error.message || "Could not save resin.");
+    }
+  }
+
+  async function handleUploadToAccount() {
+    if (!user) {
+      setStatusMessage("Sign in to upload files.");
+      return;
+    }
+    if (!files.length) {
+      setStatusMessage("Select STL files before uploading.");
+      return;
+    }
+    setStatusMessage("");
+    for (const file of files) {
+      try {
+        const createdFile = await storage.createFile(
+          bucketId,
+          ID.unique(),
+          file
+        );
+        await databases.createDocument(
+          databaseId,
+          uploadsCollectionId,
+          ID.unique(),
+          {
+            file_name: file.name,
+            file_id: createdFile.$id,
+            size_bytes: file.size,
+          }
+        );
+      } catch (error) {
+        setStatusMessage(error.message || "Upload failed.");
+        return;
+      }
+    }
+
+    const data = await databases.listDocuments(
+      databaseId,
+      uploadsCollectionId,
+      [Query.orderDesc("$createdAt")]
+    );
+    setUploads(data.documents ?? []);
+    setStatusMessage("Files uploaded successfully.");
+  }
+
   return (
     <div className="app">
       <header className="hero">
@@ -142,6 +370,63 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      <section className="card auth">
+        <div className="auth-header">
+          <div>
+            <h2>Account</h2>
+            <p>Save printers, resins, and uploads to your profile.</p>
+          </div>
+          {user && (
+            <button className="secondary" type="button" onClick={handleSignOut}>
+              Sign out
+            </button>
+          )}
+        </div>
+        {user ? (
+          <p className="status">Signed in as {user.email}</p>
+        ) : (
+          <form className="auth-form" onSubmit={handleAuthSubmit}>
+            <div className="form-grid">
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="you@example.com"
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  placeholder="••••••••"
+                />
+              </label>
+            </div>
+            <div className="auth-actions">
+              <button type="submit" className="primary">
+                {authMode === "signin" ? "Sign in" : "Create account"}
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() =>
+                  setAuthMode(authMode === "signin" ? "signup" : "signin")
+                }
+              >
+                {authMode === "signin"
+                  ? "Need an account? Sign up"
+                  : "Already have an account? Sign in"}
+              </button>
+            </div>
+          </form>
+        )}
+        {statusMessage && <p className="status">{statusMessage}</p>}
+      </section>
 
       <section className="card">
         <h2>Setup</h2>
@@ -174,6 +459,20 @@ export default function App() {
             />
           </label>
           <label>
+            Resin from library
+            <select
+              value={selectedResinId}
+              onChange={(event) => setSelectedResinId(event.target.value)}
+            >
+              <option value="">Select saved resin</option>
+              {resins.map((item) => (
+                <option key={item.$id} value={item.$id}>
+                  {item.brand} {item.model}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Resin price per liter (USD)
             <input
               type="number"
@@ -183,6 +482,129 @@ export default function App() {
               onChange={(event) => setPricePerLiter(Number(event.target.value))}
             />
           </label>
+        </div>
+      </section>
+
+      <section className="card library">
+        <div>
+          <h2>Library</h2>
+          <p>Add printers and resins to reuse across projects.</p>
+        </div>
+        <div className="library-grid">
+          <form onSubmit={handleAddPrinter}>
+            <h3>Printers</h3>
+            <label>
+              Name
+              <input
+                type="text"
+                value={newPrinter.name}
+                onChange={(event) =>
+                  setNewPrinter((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
+                }
+                placeholder="e.g. Main printer"
+              />
+            </label>
+            <label>
+              Model
+              <input
+                type="text"
+                value={newPrinter.model}
+                onChange={(event) =>
+                  setNewPrinter((prev) => ({
+                    ...prev,
+                    model: event.target.value,
+                  }))
+                }
+                placeholder="e.g. Elegoo Saturn 3"
+              />
+            </label>
+            <label>
+              Notes
+              <input
+                type="text"
+                value={newPrinter.notes}
+                onChange={(event) =>
+                  setNewPrinter((prev) => ({
+                    ...prev,
+                    notes: event.target.value,
+                  }))
+                }
+                placeholder="Build plate, settings, etc."
+              />
+            </label>
+            <button type="submit" className="primary" disabled={!user}>
+              Save printer
+            </button>
+            {!user && <p className="hint">Sign in to save printers.</p>}
+            <ul className="item-list">
+              {printers.map((item) => (
+                <li key={item.$id}>
+                  <strong>{item.name}</strong> · {item.model}
+                </li>
+              ))}
+            </ul>
+          </form>
+          <form onSubmit={handleAddResin}>
+            <h3>Resins</h3>
+            <label>
+              Brand
+              <input
+                type="text"
+                value={newResin.brand}
+                onChange={(event) =>
+                  setNewResin((prev) => ({
+                    ...prev,
+                    brand: event.target.value,
+                  }))
+                }
+                placeholder="e.g. Anycubic"
+              />
+            </label>
+            <label>
+              Model
+              <input
+                type="text"
+                value={newResin.model}
+                onChange={(event) =>
+                  setNewResin((prev) => ({
+                    ...prev,
+                    model: event.target.value,
+                  }))
+                }
+                placeholder="e.g. Standard+"
+              />
+            </label>
+            <label>
+              Price per liter (USD)
+              <input
+                type="number"
+                min="0"
+                step="10"
+                value={newResin.pricePerLiter}
+                onChange={(event) =>
+                  setNewResin((prev) => ({
+                    ...prev,
+                    pricePerLiter: Number(event.target.value),
+                  }))
+                }
+              />
+            </label>
+            <button type="submit" className="primary" disabled={!user}>
+              Save resin
+            </button>
+            {!user && <p className="hint">Sign in to save resins.</p>}
+            <ul className="item-list">
+              {resins.map((item) => (
+                <li key={item.$id}>
+                  <strong>{item.brand}</strong> · {item.model} ·{" "}
+                  {currencyFormatter.format(item.price_per_liter || 0)}
+                </li>
+              ))}
+            </ul>
+          </form>
         </div>
       </section>
 
@@ -200,6 +622,14 @@ export default function App() {
           />
           <span>Select files</span>
         </label>
+        <button
+          type="button"
+          className="primary"
+          onClick={handleUploadToAccount}
+          disabled={!user || !files.length}
+        >
+          Upload to account
+        </button>
       </section>
 
       <section className="card summary">
@@ -264,6 +694,23 @@ export default function App() {
               </div>
             ))}
           </div>
+        )}
+      </section>
+
+      <section className="card uploads">
+        <h2>Uploaded STL files</h2>
+        {!user ? (
+          <p className="empty">Sign in to see your uploads.</p>
+        ) : uploads.length === 0 ? (
+          <p className="empty">No uploads yet.</p>
+        ) : (
+          <ul className="item-list">
+            {uploads.map((item) => (
+              <li key={item.$id}>
+                <strong>{item.file_name}</strong> · {item.size_bytes} bytes
+              </li>
+            ))}
+          </ul>
         )}
       </section>
     </div>

@@ -103,10 +103,54 @@ input {
   font-size: 0.95rem;
 }
 
+select {
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #0b1220;
+  color: #f8fafc;
+  font-size: 0.95rem;
+}
+
 input:focus {
   outline: none;
   border-color: #38bdf8;
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+}
+
+select:focus {
+  outline: none;
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+}
+
+button {
+  border: none;
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.primary {
+  background: #38bdf8;
+  color: #0b1120;
+}
+
+button.secondary {
+  background: #1f2937;
+  color: #e2e8f0;
+}
+
+button.ghost {
+  background: transparent;
+  color: #94a3b8;
+  padding: 8px 0;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .uploader {
@@ -208,6 +252,54 @@ input:focus {
 
 .empty {
   color: #94a3b8;
+}
+
+.auth-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.status {
+  color: #38bdf8;
+}
+
+.hint {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.library-grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.library-grid form {
+  display: grid;
+  gap: 12px;
+}
+
+.item-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 8px;
+  color: #cbd5f5;
 }
 
 @media (max-width: 720px) {
