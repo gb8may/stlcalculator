@@ -50,22 +50,28 @@ body {
 }
 
 .hero-card {
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid #1f2937;
-  border-radius: 18px;
-  padding: 20px 24px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.9));
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 20px;
+  padding: 22px 26px;
   display: grid;
-  gap: 12px;
+  gap: 16px;
   min-width: 260px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(10px);
 }
 
 .hero-card span {
-  color: #94a3b8;
-  font-size: 0.85rem;
+  color: #cbd5f5;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.hero-card strong {
-  font-size: 1.4rem;
+.hero-card .hero-metric {
+  display: block;
+  font-size: 1.6rem;
+  margin-top: 4px;
 }
 
 .card {
@@ -224,6 +230,13 @@ label.toggle input {
   font-size: 1.2rem;
 }
 
+.subtitle {
+  display: block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
 .table-header {
   display: flex;
   justify-content: space-between;
@@ -238,7 +251,7 @@ label.toggle input {
 
 .table-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr 1fr;
   gap: 12px;
   margin-top: 16px;
   font-size: 0.9rem;
@@ -325,6 +338,28 @@ label.toggle input {
 .hint {
   color: #94a3b8;
   font-size: 0.85rem;
+}
+
+.segmented {
+  display: inline-flex;
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 4px;
+  gap: 6px;
+}
+
+.segmented button {
+  background: transparent;
+  color: #cbd5f5;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+}
+
+.segmented button.active {
+  background: #38bdf8;
+  color: #0b1120;
 }
 
 .library-grid {

@@ -84,11 +84,16 @@ export default function App() {
   const [printer, setPrinter] = useState("");
   const [resin, setResin] = useState("");
   const [pricePerLiter, setPricePerLiter] = useState(200);
+  const [energyRate, setEnergyRate] = useState(0.2);
+  const [printerPower, setPrinterPower] = useState(50);
+  const [printHours, setPrintHours] = useState(2);
+  const [includeEnergy, setIncludeEnergy] = useState(true);
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [supportPercent, setSupportPercent] = useState(20);
   const [includeSupports, setIncludeSupports] = useState(true);
+  const [costMode, setCostMode] = useState("per_stl");
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0);
   const [previewGeometry, setPreviewGeometry] = useState(null);
   const [previewError, setPreviewError] = useState("");
@@ -326,6 +331,12 @@ export default function App() {
   }, [previewGeometry]);
 
   const pricePerMl = pricePerLiter / 1000;
+  const energyCostBase =
+    (printerPower / 1000) * Math.max(printHours, 0) * Math.max(energyRate, 0);
+  const energyCostPerStl =
+    includeEnergy && costMode === "per_stl" ? energyCostBase : 0;
+  const energyCostPerProject =
+    includeEnergy && costMode === "per_project" ? energyCostBase : 0;
 
   useEffect(() => {
     if (!selectedResinId) return;
@@ -343,15 +354,26 @@ export default function App() {
       const totalVolumeMl = includeSupports
         ? volumeMl + supportVolumeMl
         : volumeMl;
+      const energyCost = energyCostPerStl;
       return {
         ...result,
         volumeMl,
         supportVolumeMl,
         totalVolumeMl,
-        cost: totalVolumeMl * pricePerMl,
+        materialCost: totalVolumeMl * pricePerMl,
+        energyCost,
+        cost: totalVolumeMl * pricePerMl + energyCost,
       };
     });
-  }, [results, pricePerMl, supportPercent, includeSupports]);
+  }, [
+    results,
+    pricePerMl,
+    supportPercent,
+    includeSupports,
+    includeEnergy,
+    energyCostPerStl,
+    costMode,
+  ]);
 
   const totals = useMemo(() => {
     return enrichedResults.reduce(
@@ -359,14 +381,28 @@ export default function App() {
         if (!result.error) {
           acc.totalVolumeMl += result.totalVolumeMl ?? result.volumeMl;
           acc.totalSupportMl += result.supportVolumeMl ?? 0;
+          acc.totalEnergyCost += result.energyCost ?? 0;
           acc.totalCost += result.cost;
           acc.validItems += 1;
         }
         return acc;
       },
-      { totalVolumeMl: 0, totalSupportMl: 0, totalCost: 0, validItems: 0 }
+      {
+        totalVolumeMl: 0,
+        totalSupportMl: 0,
+        totalEnergyCost: 0,
+        totalCost: 0,
+        validItems: 0,
+      }
     );
   }, [enrichedResults]);
+
+  const energyCostTotal =
+    costMode === "per_project"
+      ? energyCostPerProject
+      : totals.totalEnergyCost;
+  const totalCostWithEnergy =
+    costMode === "per_project" ? totals.totalCost + energyCostTotal : totals.totalCost;
 
   async function handleAuthSubmit(event) {
     event.preventDefault();
@@ -534,11 +570,15 @@ export default function App() {
         <div className="hero-card">
           <div>
             <span>Total volume</span>
-            <strong>{numberFormatter.format(totals.totalVolumeMl)} ml</strong>
+            <strong className="hero-metric">
+              {numberFormatter.format(totals.totalVolumeMl)} ml
+            </strong>
           </div>
           <div>
             <span>Total cost</span>
-            <strong>{currencyFormatter.format(totals.totalCost)}</strong>
+            <strong className="hero-metric">
+              {currencyFormatter.format(totalCostWithEnergy)}
+            </strong>
           </div>
         </div>
       </header>
@@ -662,6 +702,55 @@ export default function App() {
             />
           </label>
           <label>
+            Cost mode
+            <div className="segmented">
+              <button
+                type="button"
+                className={costMode === "per_stl" ? "active" : ""}
+                onClick={() => setCostMode("per_stl")}
+              >
+                Per STL
+              </button>
+              <button
+                type="button"
+                className={costMode === "per_project" ? "active" : ""}
+                onClick={() => setCostMode("per_project")}
+              >
+                Per project
+              </button>
+            </div>
+          </label>
+          <label>
+            Energy rate (CAD/kWh)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={energyRate}
+              onChange={(event) => setEnergyRate(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            Printer power (W)
+            <input
+              type="number"
+              min="0"
+              step="10"
+              value={printerPower}
+              onChange={(event) => setPrinterPower(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            Print time {costMode === "per_project" ? "(project hours)" : "(hours per STL)"}
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={printHours}
+              onChange={(event) => setPrintHours(Number(event.target.value))}
+            />
+          </label>
+          <label>
             Support estimate ({supportPercent}%)
             <input
               type="range"
@@ -679,40 +768,22 @@ export default function App() {
             />
             Include supports in cost
           </label>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={includeEnergy}
+              onChange={(event) => setIncludeEnergy(event.target.checked)}
+            />
+            Include energy in cost
+          </label>
         </div>
         <p className="hint">
           Support volume is an estimate based on a percentage of model volume.
           For accurate values, use a slicer.
         </p>
-      </section>
-
-      <section className="card preview">
-        <div className="preview-header">
-          <div>
-            <h2>STL Preview</h2>
-            <p>Inspect the model and orbit with your mouse.</p>
-          </div>
-          <select
-            value={selectedPreviewIndex}
-            onChange={(event) =>
-              setSelectedPreviewIndex(Number(event.target.value))
-            }
-            disabled={!files.length}
-          >
-            {files.length === 0 && <option>No file selected</option>}
-            {files.map((file, index) => (
-              <option key={file.name} value={index}>
-                {file.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="preview-canvas" ref={previewRef}>
-          {!previewGeometry && !previewError && (
-            <p className="empty">Upload STL files to preview.</p>
-          )}
-          {previewError && <p className="error">{previewError}</p>}
-        </div>
+        <p className="hint">
+          Energy cost uses your local rate, printer wattage, and print time.
+        </p>
       </section>
 
       <section className="card library">
@@ -870,6 +941,35 @@ export default function App() {
         </button>
       </section>
 
+      <section className="card preview">
+        <div className="preview-header">
+          <div>
+            <h2>STL Preview</h2>
+            <p>Inspect the model and orbit with your mouse.</p>
+          </div>
+          <select
+            value={selectedPreviewIndex}
+            onChange={(event) =>
+              setSelectedPreviewIndex(Number(event.target.value))
+            }
+            disabled={!files.length}
+          >
+            {files.length === 0 && <option>No file selected</option>}
+            {files.map((file, index) => (
+              <option key={file.name} value={index}>
+                {file.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="preview-canvas" ref={previewRef}>
+          {!previewGeometry && !previewError && (
+            <p className="empty">Upload STL files to preview.</p>
+          )}
+          {previewError && <p className="error">{previewError}</p>}
+        </div>
+      </section>
+
       <section className="card summary">
         <div className="badges">
           <span>{location || "Location not set"}</span>
@@ -893,6 +993,17 @@ export default function App() {
             <span>Support volume</span>
             <strong>{numberFormatter.format(totals.totalSupportMl)} ml</strong>
           </div>
+          <div>
+            <span>Energy cost</span>
+            <strong>{currencyFormatter.format(energyCostTotal)}</strong>
+            <span className="subtitle">
+              {costMode === "per_project" ? "per project" : "per STL"}
+            </span>
+          </div>
+          <div>
+            <span>Total cost (incl. energy)</span>
+            <strong>{currencyFormatter.format(totalCostWithEnergy)}</strong>
+          </div>
         </div>
       </section>
 
@@ -911,6 +1022,7 @@ export default function App() {
             <div>Volume (mm³)</div>
             <div>Volume (ml)</div>
             <div>Supports (ml)</div>
+            <div>Energy</div>
             <div>Cost</div>
             <div>Status</div>
             {enrichedResults.map((result) => (
@@ -930,6 +1042,13 @@ export default function App() {
                   {result.error
                     ? "-"
                     : numberFormatter.format(result.supportVolumeMl)}
+                </span>
+                <span>
+                  {result.error
+                    ? "-"
+                    : costMode === "per_project"
+                      ? "-"
+                      : currencyFormatter.format(result.energyCost)}
                 </span>
                 <span>
                   {result.error
