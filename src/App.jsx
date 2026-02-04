@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Client, Account, Databases, Storage, ID, Query } from "appwrite";
 
-const currencyFormatter = new Intl.NumberFormat("en-US", {
+const currencyFormatter = new Intl.NumberFormat("en-CA", {
   style: "currency",
-  currency: "USD",
+  currency: "CAD",
 });
 
 const numberFormatter = new Intl.NumberFormat("en-US", {
@@ -89,6 +90,12 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [supportPercent, setSupportPercent] = useState(20);
+  const [includeSupports, setIncludeSupports] = useState(true);
+  const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0);
+  const [previewGeometry, setPreviewGeometry] = useState(null);
+  const [previewError, setPreviewError] = useState("");
+  const previewRef = useRef(null);
 
   useEffect(() => {
     async function getUser() {
@@ -139,6 +146,7 @@ export default function App() {
   useEffect(() => {
     if (!files.length) {
       setResults([]);
+      setSelectedPreviewIndex(0);
       return;
     }
 
@@ -175,6 +183,106 @@ export default function App() {
     };
   }, [files]);
 
+  useEffect(() => {
+    if (!files.length) {
+      setPreviewGeometry(null);
+      setPreviewError("");
+      return;
+    }
+
+    const file = files[selectedPreviewIndex] || files[0];
+    if (!file) return;
+    const loader = new STLLoader();
+    setPreviewError("");
+
+    file
+      .arrayBuffer()
+      .then((buffer) => {
+        const geometry = loader.parse(buffer);
+        geometry.computeVertexNormals();
+        setPreviewGeometry(geometry);
+      })
+      .catch(() => {
+        setPreviewGeometry(null);
+        setPreviewError("Unable to render STL preview.");
+      });
+  }, [files, selectedPreviewIndex]);
+
+  useEffect(() => {
+    if (!previewRef.current || !previewGeometry) return;
+
+    const container = previewRef.current;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b1120);
+
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    container.innerHTML = "";
+    container.appendChild(renderer.domElement);
+
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      metalness: 0.2,
+      roughness: 0.4,
+    });
+    const mesh = new THREE.Mesh(previewGeometry, material);
+    scene.add(mesh);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+    const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+    directional.position.set(5, 8, 10);
+    scene.add(ambient, directional);
+
+    previewGeometry.computeBoundingBox();
+    const box = previewGeometry.boundingBox;
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+    mesh.position.sub(center);
+
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    camera.near = maxDim / 100;
+    camera.far = maxDim * 10;
+    camera.position.set(0, 0, maxDim * 1.8);
+    camera.updateProjectionMatrix();
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    const resize = () => {
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      renderer.setSize(width, height);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+    };
+
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(container);
+    resize();
+
+    let frame = 0;
+    const animate = () => {
+      frame = requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    return () => {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      controls.dispose();
+      material.dispose();
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+    };
+  }, [previewGeometry]);
+
   const pricePerMl = pricePerLiter / 1000;
 
   useEffect(() => {
@@ -189,25 +297,32 @@ export default function App() {
     return results.map((result) => {
       if (result.error) return result;
       const volumeMl = result.volumeMm3 / 1000;
+      const supportVolumeMl = volumeMl * (supportPercent / 100);
+      const totalVolumeMl = includeSupports
+        ? volumeMl + supportVolumeMl
+        : volumeMl;
       return {
         ...result,
         volumeMl,
-        cost: volumeMl * pricePerMl,
+        supportVolumeMl,
+        totalVolumeMl,
+        cost: totalVolumeMl * pricePerMl,
       };
     });
-  }, [results, pricePerMl]);
+  }, [results, pricePerMl, supportPercent, includeSupports]);
 
   const totals = useMemo(() => {
     return enrichedResults.reduce(
       (acc, result) => {
         if (!result.error) {
-          acc.totalVolumeMl += result.volumeMl;
+          acc.totalVolumeMl += result.totalVolumeMl ?? result.volumeMl;
+          acc.totalSupportMl += result.supportVolumeMl ?? 0;
           acc.totalCost += result.cost;
           acc.validItems += 1;
         }
         return acc;
       },
-      { totalVolumeMl: 0, totalCost: 0, validItems: 0 }
+      { totalVolumeMl: 0, totalSupportMl: 0, totalCost: 0, validItems: 0 }
     );
   }, [enrichedResults]);
 
@@ -473,7 +588,7 @@ export default function App() {
             </select>
           </label>
           <label>
-            Resin price per liter (USD)
+            Resin price per liter (CAD)
             <input
               type="number"
               min="0"
@@ -482,6 +597,57 @@ export default function App() {
               onChange={(event) => setPricePerLiter(Number(event.target.value))}
             />
           </label>
+          <label>
+            Support estimate ({supportPercent}%)
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={supportPercent}
+              onChange={(event) => setSupportPercent(Number(event.target.value))}
+            />
+          </label>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={includeSupports}
+              onChange={(event) => setIncludeSupports(event.target.checked)}
+            />
+            Include supports in cost
+          </label>
+        </div>
+        <p className="hint">
+          Support volume is an estimate based on a percentage of model volume.
+          For accurate values, use a slicer.
+        </p>
+      </section>
+
+      <section className="card preview">
+        <div className="preview-header">
+          <div>
+            <h2>STL Preview</h2>
+            <p>Inspect the model and orbit with your mouse.</p>
+          </div>
+          <select
+            value={selectedPreviewIndex}
+            onChange={(event) =>
+              setSelectedPreviewIndex(Number(event.target.value))
+            }
+            disabled={!files.length}
+          >
+            {files.length === 0 && <option>No file selected</option>}
+            {files.map((file, index) => (
+              <option key={file.name} value={index}>
+                {file.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="preview-canvas" ref={previewRef}>
+          {!previewGeometry && !previewError && (
+            <p className="empty">Upload STL files to preview.</p>
+          )}
+          {previewError && <p className="error">{previewError}</p>}
         </div>
       </section>
 
@@ -578,7 +744,7 @@ export default function App() {
               />
             </label>
             <label>
-              Price per liter (USD)
+              Price per liter (CAD)
               <input
                 type="number"
                 min="0"
@@ -651,6 +817,10 @@ export default function App() {
             <span>Valid items</span>
             <strong>{totals.validItems}</strong>
           </div>
+          <div>
+            <span>Support volume</span>
+            <strong>{numberFormatter.format(totals.totalSupportMl)} ml</strong>
+          </div>
         </div>
       </section>
 
@@ -668,6 +838,7 @@ export default function App() {
             <div>File</div>
             <div>Volume (mm³)</div>
             <div>Volume (ml)</div>
+            <div>Supports (ml)</div>
             <div>Cost</div>
             <div>Status</div>
             {enrichedResults.map((result) => (
@@ -682,6 +853,11 @@ export default function App() {
                   {result.error
                     ? "-"
                     : numberFormatter.format(result.volumeMl)}
+                </span>
+                <span>
+                  {result.error
+                    ? "-"
+                    : numberFormatter.format(result.supportVolumeMl)}
                 </span>
                 <span>
                   {result.error

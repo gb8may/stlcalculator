@@ -153,6 +153,17 @@ button:disabled {
   cursor: not-allowed;
 }
 
+label.toggle {
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: start;
+  gap: 10px;
+}
+
+label.toggle input {
+  width: auto;
+}
+
 .uploader {
   display: flex;
   align-items: center;
@@ -227,7 +238,7 @@ button:disabled {
 
 .table-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;
   gap: 12px;
   margin-top: 16px;
   font-size: 0.9rem;
@@ -252,6 +263,36 @@ button:disabled {
 
 .empty {
   color: #94a3b8;
+}
+
+.preview {
+  display: grid;
+  gap: 16px;
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.preview-canvas {
+  height: 320px;
+  border-radius: 16px;
+  border: 1px solid #1f2937;
+  background: #0b1220;
+  display: grid;
+  place-items: center;
+  color: #94a3b8;
+  overflow: hidden;
+}
+
+.preview-canvas canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .auth-header {
