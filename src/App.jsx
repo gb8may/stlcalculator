@@ -119,6 +119,8 @@ const appwriteConfig = {
     import.meta.env.VITE_APPWRITE_PRINTERS_COLLECTION_ID || "",
   resinsCollectionId:
     import.meta.env.VITE_APPWRITE_RESINS_COLLECTION_ID || "",
+  filamentsCollectionId:
+    import.meta.env.VITE_APPWRITE_FILAMENTS_COLLECTION_ID || "",
   uploadsCollectionId:
     import.meta.env.VITE_APPWRITE_UPLOADS_COLLECTION_ID || "",
   bucketId: import.meta.env.VITE_APPWRITE_BUCKET_ID || "",
@@ -133,8 +135,15 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState("");
   const [printers, setPrinters] = useState([]);
   const [resins, setResins] = useState([]);
+  const [filaments, setFilaments] = useState([]);
   const [uploads, setUploads] = useState([]);
   const [newPrinter, setNewPrinter] = useState({
+    name: "",
+    model: "",
+    notes: "",
+  });
+  const [editPrinterId, setEditPrinterId] = useState("");
+  const [editPrinter, setEditPrinter] = useState({
     name: "",
     model: "",
     notes: "",
@@ -144,7 +153,27 @@ export default function App() {
     model: "",
     pricePerLiter: 200,
   });
+  const [editResinId, setEditResinId] = useState("");
+  const [editResin, setEditResin] = useState({
+    brand: "",
+    model: "",
+    pricePerLiter: 200,
+  });
+  const [newFilament, setNewFilament] = useState({
+    brand: "",
+    material: "",
+    pricePerKg: 25,
+    density: 1.24,
+  });
+  const [editFilamentId, setEditFilamentId] = useState("");
+  const [editFilament, setEditFilament] = useState({
+    brand: "",
+    material: "",
+    pricePerKg: 25,
+    density: 1.24,
+  });
   const [selectedResinId, setSelectedResinId] = useState("");
+  const [selectedFilamentId, setSelectedFilamentId] = useState("");
   const [location, setLocation] = useState("");
   const [printer, setPrinter] = useState("");
   const [resin, setResin] = useState("");
@@ -185,6 +214,8 @@ export default function App() {
       missing.push("VITE_APPWRITE_PRINTERS_COLLECTION_ID");
     if (!appwriteConfig.resinsCollectionId)
       missing.push("VITE_APPWRITE_RESINS_COLLECTION_ID");
+    if (!appwriteConfig.filamentsCollectionId)
+      missing.push("VITE_APPWRITE_FILAMENTS_COLLECTION_ID");
     if (!appwriteConfig.uploadsCollectionId)
       missing.push("VITE_APPWRITE_UPLOADS_COLLECTION_ID");
     if (!appwriteConfig.bucketId) missing.push("VITE_APPWRITE_BUCKET_ID");
@@ -231,13 +262,15 @@ export default function App() {
     if (!user || !appwriteRef.current) {
       setPrinters([]);
       setResins([]);
+      setFilaments([]);
       setUploads([]);
       return;
     }
 
     async function loadData() {
       try {
-        const [printersData, resinsData, uploadsData] = await Promise.all([
+        const [printersData, resinsData, filamentsData, uploadsData] =
+          await Promise.all([
           appwriteRef.current.databases.listDocuments(
             appwriteConfig.databaseId,
             appwriteConfig.printersCollectionId,
@@ -250,6 +283,11 @@ export default function App() {
           ),
           appwriteRef.current.databases.listDocuments(
             appwriteConfig.databaseId,
+            appwriteConfig.filamentsCollectionId,
+            [Query.orderDesc("$createdAt")]
+          ),
+          appwriteRef.current.databases.listDocuments(
+            appwriteConfig.databaseId,
             appwriteConfig.uploadsCollectionId,
             [Query.orderDesc("$createdAt")]
           ),
@@ -257,6 +295,7 @@ export default function App() {
 
         setPrinters(printersData.documents ?? []);
         setResins(resinsData.documents ?? []);
+        setFilaments(filamentsData.documents ?? []);
         setUploads(uploadsData.documents ?? []);
       } catch (error) {
         setStatusMessage(error.message || "Could not load data.");
@@ -447,6 +486,56 @@ export default function App() {
     }
   }, [resins, selectedResinId, printType]);
 
+  useEffect(() => {
+    if (!editPrinterId) return;
+    const item = printers.find((printer) => printer.$id === editPrinterId);
+    if (item) {
+      setEditPrinter({
+        name: item.name || "",
+        model: item.model || "",
+        notes: item.notes || "",
+      });
+    }
+  }, [editPrinterId, printers]);
+
+  useEffect(() => {
+    if (!editResinId) return;
+    const item = resins.find((resin) => resin.$id === editResinId);
+    if (item) {
+      setEditResin({
+        brand: item.brand || "",
+        model: item.model || "",
+        pricePerLiter: Number(item.price_per_liter || 0),
+      });
+    }
+  }, [editResinId, resins]);
+
+  useEffect(() => {
+    if (!editFilamentId) return;
+    const item = filaments.find((filament) => filament.$id === editFilamentId);
+    if (item) {
+      setEditFilament({
+        brand: item.brand || "",
+        material: item.material || "",
+        pricePerKg: Number(item.price_per_kg || 0),
+        density: Number(item.density || 0),
+      });
+    }
+  }, [editFilamentId, filaments]);
+
+  useEffect(() => {
+    if (!selectedFilamentId || printType !== "filament") return;
+    const filamentItem = filaments.find(
+      (item) => item.$id === selectedFilamentId
+    );
+    if (filamentItem?.price_per_kg) {
+      setPricePerKg(Number(filamentItem.price_per_kg));
+    }
+    if (filamentItem?.density) {
+      setFilamentDensity(Number(filamentItem.density));
+    }
+  }, [filaments, selectedFilamentId, printType]);
+
   const enrichedResults = useMemo(() => {
     return results.map((result) => {
       if (result.error) return result;
@@ -620,6 +709,36 @@ export default function App() {
     }
   }
 
+  async function handleUpdatePrinter(event) {
+    event.preventDefault();
+    if (!editPrinterId) {
+      setStatusMessage("Select a printer to update.");
+      return;
+    }
+    try {
+      if (!appwriteRef.current) return;
+      await appwriteRef.current.databases.updateDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.printersCollectionId,
+        editPrinterId,
+        {
+          name: editPrinter.name,
+          model: editPrinter.model,
+          notes: editPrinter.notes,
+        }
+      );
+      setStatusMessage("Printer updated.");
+      const data = await appwriteRef.current.databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.printersCollectionId,
+        [Query.orderDesc("$createdAt")]
+      );
+      setPrinters(data.documents ?? []);
+    } catch (error) {
+      setStatusMessage(error.message || "Could not update printer.");
+    }
+  }
+
   async function handleAddResin(event) {
     event.preventDefault();
     if (!newResin.brand || !newResin.model) {
@@ -654,6 +773,110 @@ export default function App() {
       setResins(data.documents ?? []);
     } catch (error) {
       setStatusMessage(error.message || "Could not save resin.");
+    }
+  }
+
+  async function handleUpdateResin(event) {
+    event.preventDefault();
+    if (!editResinId) {
+      setStatusMessage("Select a resin to update.");
+      return;
+    }
+    try {
+      if (!appwriteRef.current) return;
+      await appwriteRef.current.databases.updateDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.resinsCollectionId,
+        editResinId,
+        {
+          brand: editResin.brand,
+          model: editResin.model,
+          price_per_liter: editResin.pricePerLiter,
+        }
+      );
+      setStatusMessage("Resin updated.");
+      const data = await appwriteRef.current.databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.resinsCollectionId,
+        [Query.orderDesc("$createdAt")]
+      );
+      setResins(data.documents ?? []);
+    } catch (error) {
+      setStatusMessage(error.message || "Could not update resin.");
+    }
+  }
+
+  async function handleAddFilament(event) {
+    event.preventDefault();
+    if (!newFilament.brand || !newFilament.material) {
+      setStatusMessage("Filament brand and material are required.");
+      return;
+    }
+    try {
+      if (!appwriteRef.current) return;
+      const permissions = [
+        Permission.read(Role.user(user.$id)),
+        Permission.update(Role.user(user.$id)),
+        Permission.delete(Role.user(user.$id)),
+      ];
+      await appwriteRef.current.databases.createDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.filamentsCollectionId,
+        ID.unique(),
+        {
+          brand: newFilament.brand,
+          material: newFilament.material,
+          price_per_kg: newFilament.pricePerKg,
+          density: newFilament.density,
+        },
+        permissions
+      );
+      setNewFilament({
+        brand: "",
+        material: "",
+        pricePerKg: 25,
+        density: 1.24,
+      });
+      setStatusMessage("Filament saved.");
+      const data = await appwriteRef.current.databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.filamentsCollectionId,
+        [Query.orderDesc("$createdAt")]
+      );
+      setFilaments(data.documents ?? []);
+    } catch (error) {
+      setStatusMessage(error.message || "Could not save filament.");
+    }
+  }
+
+  async function handleUpdateFilament(event) {
+    event.preventDefault();
+    if (!editFilamentId) {
+      setStatusMessage("Select a filament to update.");
+      return;
+    }
+    try {
+      if (!appwriteRef.current) return;
+      await appwriteRef.current.databases.updateDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.filamentsCollectionId,
+        editFilamentId,
+        {
+          brand: editFilament.brand,
+          material: editFilament.material,
+          price_per_kg: editFilament.pricePerKg,
+          density: editFilament.density,
+        }
+      );
+      setStatusMessage("Filament updated.");
+      const data = await appwriteRef.current.databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.filamentsCollectionId,
+        [Query.orderDesc("$createdAt")]
+      );
+      setFilaments(data.documents ?? []);
+    } catch (error) {
+      setStatusMessage(error.message || "Could not update filament.");
     }
   }
 
@@ -727,7 +950,7 @@ export default function App() {
       <header className="hero">
         <div>
           <span className="eyebrow">STL Calculator</span>
-          <h1>Smart resin printing estimator</h1>
+          <h1>Smart 3D Printing Estimator</h1>
           <p>
             Upload your STLs, set resin price, and get cost per piece and per
             project in seconds.
@@ -906,6 +1129,19 @@ export default function App() {
           {printType === "filament" && (
             <>
               <label>
+                Filament from library
+                <CustomSelect
+                  value={selectedFilamentId}
+                  onChange={setSelectedFilamentId}
+                  placeholder="Select saved filament"
+                  disabled={!appwriteReady}
+                  options={filaments.map((item) => ({
+                    value: item.$id,
+                    label: `${item.brand} ${item.material}`,
+                  }))}
+                />
+              </label>
+              <label>
                 Filament price per kg (CAD)
                 <input
                   type="number"
@@ -1052,7 +1288,7 @@ export default function App() {
         )}
       </section>
 
-      <details className="card library" open>
+      <details className="card library">
         <summary>
           <div>
             <h2>Library</h2>
@@ -1112,13 +1348,68 @@ export default function App() {
               Save printer
             </button>
             {!user && <p className="hint">Sign in to save printers.</p>}
-            <ul className="item-list">
-              {printers.map((item) => (
-                <li key={item.$id}>
-                  <strong>{item.name}</strong> · {item.model}
-                </li>
-              ))}
-            </ul>
+          </form>
+          <form onSubmit={handleUpdatePrinter}>
+            <h3>Edit printer</h3>
+            <label>
+              Select printer
+              <CustomSelect
+                value={editPrinterId}
+                onChange={setEditPrinterId}
+                placeholder="Select printer"
+                disabled={!appwriteReady}
+                options={printers.map((item) => ({
+                  value: item.$id,
+                  label: `${item.name} · ${item.model}`,
+                }))}
+              />
+            </label>
+            <label>
+              Name
+              <input
+                type="text"
+                value={editPrinter.name}
+                onChange={(event) =>
+                  setEditPrinter((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Model
+              <input
+                type="text"
+                value={editPrinter.model}
+                onChange={(event) =>
+                  setEditPrinter((prev) => ({
+                    ...prev,
+                    model: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Notes
+              <input
+                type="text"
+                value={editPrinter.notes}
+                onChange={(event) =>
+                  setEditPrinter((prev) => ({
+                    ...prev,
+                    notes: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <button
+              type="submit"
+              className="secondary"
+              disabled={!user || !appwriteReady}
+            >
+              Update printer
+            </button>
           </form>
           <form onSubmit={handleAddResin}>
             <h3>Resins</h3>
@@ -1173,14 +1464,218 @@ export default function App() {
               Save resin
             </button>
             {!user && <p className="hint">Sign in to save resins.</p>}
-            <ul className="item-list">
-              {resins.map((item) => (
-                <li key={item.$id}>
-                  <strong>{item.brand}</strong> · {item.model} ·{" "}
-                  {currencyFormatter.format(item.price_per_liter || 0)}
-                </li>
-              ))}
-            </ul>
+          </form>
+          <form onSubmit={handleUpdateResin}>
+            <h3>Edit resin</h3>
+            <label>
+              Select resin
+              <CustomSelect
+                value={editResinId}
+                onChange={setEditResinId}
+                placeholder="Select resin"
+                disabled={!appwriteReady}
+                options={resins.map((item) => ({
+                  value: item.$id,
+                  label: `${item.brand} ${item.model}`,
+                }))}
+              />
+            </label>
+            <label>
+              Brand
+              <input
+                type="text"
+                value={editResin.brand}
+                onChange={(event) =>
+                  setEditResin((prev) => ({
+                    ...prev,
+                    brand: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Model
+              <input
+                type="text"
+                value={editResin.model}
+                onChange={(event) =>
+                  setEditResin((prev) => ({
+                    ...prev,
+                    model: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Price per liter (CAD)
+              <input
+                type="number"
+                min="0"
+                step="10"
+                value={editResin.pricePerLiter}
+                onChange={(event) =>
+                  setEditResin((prev) => ({
+                    ...prev,
+                    pricePerLiter: Number(event.target.value),
+                  }))
+                }
+              />
+            </label>
+            <button
+              type="submit"
+              className="secondary"
+              disabled={!user || !appwriteReady}
+            >
+              Update resin
+            </button>
+          </form>
+          <form onSubmit={handleAddFilament}>
+            <h3>Filaments</h3>
+            <label>
+              Brand
+              <input
+                type="text"
+                value={newFilament.brand}
+                onChange={(event) =>
+                  setNewFilament((prev) => ({
+                    ...prev,
+                    brand: event.target.value,
+                  }))
+                }
+                placeholder="e.g. Polymaker"
+              />
+            </label>
+            <label>
+              Material
+              <input
+                type="text"
+                value={newFilament.material}
+                onChange={(event) =>
+                  setNewFilament((prev) => ({
+                    ...prev,
+                    material: event.target.value,
+                  }))
+                }
+                placeholder="e.g. PLA"
+              />
+            </label>
+            <label>
+              Price per kg (CAD)
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={newFilament.pricePerKg}
+                onChange={(event) =>
+                  setNewFilament((prev) => ({
+                    ...prev,
+                    pricePerKg: Number(event.target.value),
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Density (g/cm³)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={newFilament.density}
+                onChange={(event) =>
+                  setNewFilament((prev) => ({
+                    ...prev,
+                    density: Number(event.target.value),
+                  }))
+                }
+              />
+            </label>
+            <button
+              type="submit"
+              className="primary"
+              disabled={!user || !appwriteReady}
+            >
+              Save filament
+            </button>
+            {!user && <p className="hint">Sign in to save filaments.</p>}
+          </form>
+          <form onSubmit={handleUpdateFilament}>
+            <h3>Edit filament</h3>
+            <label>
+              Select filament
+              <CustomSelect
+                value={editFilamentId}
+                onChange={setEditFilamentId}
+                placeholder="Select filament"
+                disabled={!appwriteReady}
+                options={filaments.map((item) => ({
+                  value: item.$id,
+                  label: `${item.brand} ${item.material}`,
+                }))}
+              />
+            </label>
+            <label>
+              Brand
+              <input
+                type="text"
+                value={editFilament.brand}
+                onChange={(event) =>
+                  setEditFilament((prev) => ({
+                    ...prev,
+                    brand: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Material
+              <input
+                type="text"
+                value={editFilament.material}
+                onChange={(event) =>
+                  setEditFilament((prev) => ({
+                    ...prev,
+                    material: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Price per kg (CAD)
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={editFilament.pricePerKg}
+                onChange={(event) =>
+                  setEditFilament((prev) => ({
+                    ...prev,
+                    pricePerKg: Number(event.target.value),
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Density (g/cm³)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={editFilament.density}
+                onChange={(event) =>
+                  setEditFilament((prev) => ({
+                    ...prev,
+                    density: Number(event.target.value),
+                  }))
+                }
+              />
+            </label>
+            <button
+              type="submit"
+              className="secondary"
+              disabled={!user || !appwriteReady}
+            >
+              Update filament
+            </button>
           </form>
         </div>
       </details>
