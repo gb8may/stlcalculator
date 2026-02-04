@@ -83,7 +83,12 @@ export default function App() {
   const [location, setLocation] = useState("");
   const [printer, setPrinter] = useState("");
   const [resin, setResin] = useState("");
+  const [printType, setPrintType] = useState("resin");
   const [pricePerLiter, setPricePerLiter] = useState(200);
+  const [pricePerKg, setPricePerKg] = useState(25);
+  const [filamentDensity, setFilamentDensity] = useState(1.24);
+  const [infillPercent, setInfillPercent] = useState(20);
+  const [shellFactor, setShellFactor] = useState(0.15);
   const [energyRate, setEnergyRate] = useState(0.2);
   const [printerPower, setPrinterPower] = useState(50);
   const [printHours, setPrintHours] = useState(2);
@@ -94,6 +99,10 @@ export default function App() {
   const [supportPercent, setSupportPercent] = useState(20);
   const [includeSupports, setIncludeSupports] = useState(true);
   const [costMode, setCostMode] = useState("per_stl");
+  const [inputMode, setInputMode] = useState("upload");
+  const [manualName, setManualName] = useState("Manual estimate");
+  const [manualResinMl, setManualResinMl] = useState(0);
+  const [manualFilamentGrams, setManualFilamentGrams] = useState(0);
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0);
   const [previewGeometry, setPreviewGeometry] = useState(null);
   const [previewError, setPreviewError] = useState("");
@@ -191,6 +200,11 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
+    if (inputMode !== "upload") {
+      setResults([]);
+      setSelectedPreviewIndex(0);
+      return;
+    }
     if (!files.length) {
       setResults([]);
       setSelectedPreviewIndex(0);
@@ -228,9 +242,28 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [files]);
+  }, [files, inputMode]);
 
   useEffect(() => {
+    if (inputMode !== "manual") return;
+    if (!manualResinMl) {
+      setResults([]);
+      return;
+    }
+    setResults([
+      {
+        name: manualName || "Manual estimate",
+        volumeMm3: manualResinMl * 1000,
+      },
+    ]);
+  }, [inputMode, manualName, manualResinMl]);
+
+  useEffect(() => {
+    if (inputMode !== "upload") {
+      setPreviewGeometry(null);
+      setPreviewError("");
+      return;
+    }
     if (!files.length) {
       setPreviewGeometry(null);
       setPreviewError("");
@@ -253,7 +286,7 @@ export default function App() {
         setPreviewGeometry(null);
         setPreviewError("Unable to render STL preview.");
       });
-  }, [files, selectedPreviewIndex]);
+  }, [files, selectedPreviewIndex, inputMode]);
 
   useEffect(() => {
     if (!previewRef.current || !previewGeometry) return;
@@ -331,6 +364,7 @@ export default function App() {
   }, [previewGeometry]);
 
   const pricePerMl = pricePerLiter / 1000;
+  const pricePerGram = pricePerKg / 1000;
   const energyCostBase =
     (printerPower / 1000) * Math.max(printHours, 0) * Math.max(energyRate, 0);
   const energyCostPerStl =
@@ -339,16 +373,37 @@ export default function App() {
     includeEnergy && costMode === "per_project" ? energyCostBase : 0;
 
   useEffect(() => {
-    if (!selectedResinId) return;
+    if (!selectedResinId || printType !== "resin") return;
     const resinItem = resins.find((item) => item.$id === selectedResinId);
     if (resinItem?.price_per_liter) {
       setPricePerLiter(Number(resinItem.price_per_liter));
     }
-  }, [resins, selectedResinId]);
+  }, [resins, selectedResinId, printType]);
 
   const enrichedResults = useMemo(() => {
     return results.map((result) => {
       if (result.error) return result;
+
+      if (printType === "filament") {
+        const volumeCm3 = result.volumeMm3 / 1000;
+        const infillRatio = Math.max(infillPercent, 0) / 100;
+        const effectiveVolumeCm3 = volumeCm3 * (infillRatio + shellFactor);
+        const estimatedGrams = effectiveVolumeCm3 * filamentDensity;
+        const materialGrams =
+          inputMode === "manual"
+            ? Math.max(manualFilamentGrams, 0)
+            : estimatedGrams;
+        const materialCost = materialGrams * pricePerGram;
+        const energyCost = energyCostPerStl;
+        return {
+          ...result,
+          filamentGrams: materialGrams,
+          materialCost,
+          energyCost,
+          cost: materialCost + energyCost,
+        };
+      }
+
       const volumeMl = result.volumeMm3 / 1000;
       const supportVolumeMl = volumeMl * (supportPercent / 100);
       const totalVolumeMl = includeSupports
@@ -368,19 +423,27 @@ export default function App() {
   }, [
     results,
     pricePerMl,
+    pricePerGram,
     supportPercent,
     includeSupports,
     includeEnergy,
     energyCostPerStl,
     costMode,
+    printType,
+    filamentDensity,
+    infillPercent,
+    shellFactor,
+    inputMode,
+    manualFilamentGrams,
   ]);
 
   const totals = useMemo(() => {
     return enrichedResults.reduce(
       (acc, result) => {
         if (!result.error) {
-          acc.totalVolumeMl += result.totalVolumeMl ?? result.volumeMl;
+          acc.totalVolumeMl += result.totalVolumeMl ?? result.volumeMl ?? 0;
           acc.totalSupportMl += result.supportVolumeMl ?? 0;
+          acc.totalFilamentGrams += result.filamentGrams ?? 0;
           acc.totalEnergyCost += result.energyCost ?? 0;
           acc.totalCost += result.cost;
           acc.validItems += 1;
@@ -390,6 +453,7 @@ export default function App() {
       {
         totalVolumeMl: 0,
         totalSupportMl: 0,
+        totalFilamentGrams: 0,
         totalEnergyCost: 0,
         totalCost: 0,
         validItems: 0,
@@ -650,11 +714,30 @@ export default function App() {
         <h2>Setup</h2>
         <div className="form-grid">
           <label>
+            Print type
+            <div className="segmented">
+              <button
+                type="button"
+                className={printType === "resin" ? "active" : ""}
+                onClick={() => setPrintType("resin")}
+              >
+                Resin
+              </button>
+              <button
+                type="button"
+                className={printType === "filament" ? "active" : ""}
+                onClick={() => setPrintType("filament")}
+              >
+                Filament
+              </button>
+            </div>
+          </label>
+          <label>
             Location
             <input
               type="text"
               value={location}
-              placeholder="e.g. Austin, TX"
+              placeholder="e.g. Toronto, ON, CA"
               onChange={(event) => setLocation(event.target.value)}
             />
           </label>
@@ -666,6 +749,21 @@ export default function App() {
               placeholder="e.g. Elegoo Saturn 3"
               onChange={(event) => setPrinter(event.target.value)}
             />
+          </label>
+          <label>
+            Printer from library
+            <select
+              value={printer}
+              onChange={(event) => setPrinter(event.target.value)}
+              disabled={!appwriteReady}
+            >
+              <option value="">Select saved printer</option>
+              {printers.map((item) => (
+                <option key={item.$id} value={`${item.name} ${item.model}`}>
+                  {item.name} · {item.model}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Resin (brand/model)
@@ -681,7 +779,7 @@ export default function App() {
             <select
               value={selectedResinId}
               onChange={(event) => setSelectedResinId(event.target.value)}
-              disabled={!appwriteReady}
+              disabled={!appwriteReady || printType !== "resin"}
             >
               <option value="">Select saved resin</option>
               {resins.map((item) => (
@@ -699,6 +797,52 @@ export default function App() {
               step="10"
               value={pricePerLiter}
               onChange={(event) => setPricePerLiter(Number(event.target.value))}
+              disabled={printType !== "resin"}
+            />
+          </label>
+          <label>
+            Filament price per kg (CAD)
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={pricePerKg}
+              onChange={(event) => setPricePerKg(Number(event.target.value))}
+              disabled={printType !== "filament"}
+            />
+          </label>
+          <label>
+            Filament density (g/cm³)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={filamentDensity}
+              onChange={(event) => setFilamentDensity(Number(event.target.value))}
+              disabled={printType !== "filament"}
+            />
+          </label>
+          <label>
+            Infill (%)
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={infillPercent}
+              onChange={(event) => setInfillPercent(Number(event.target.value))}
+              disabled={printType !== "filament"}
+            />
+          </label>
+          <label>
+            Shell factor
+            <input
+              type="number"
+              min="0"
+              step="0.05"
+              value={shellFactor}
+              onChange={(event) => setShellFactor(Number(event.target.value))}
+              disabled={printType !== "filament"}
             />
           </label>
           <label>
@@ -758,6 +902,7 @@ export default function App() {
               max="100"
               value={supportPercent}
               onChange={(event) => setSupportPercent(Number(event.target.value))}
+              disabled={printType !== "resin"}
             />
           </label>
           <label className="toggle">
@@ -765,6 +910,7 @@ export default function App() {
               type="checkbox"
               checked={includeSupports}
               onChange={(event) => setIncludeSupports(event.target.checked)}
+              disabled={printType !== "resin"}
             />
             Include supports in cost
           </label>
@@ -777,13 +923,20 @@ export default function App() {
             Include energy in cost
           </label>
         </div>
-        <p className="hint">
-          Support volume is an estimate based on a percentage of model volume.
-          For accurate values, use a slicer.
-        </p>
+        {printType === "resin" && (
+          <p className="hint">
+            Support volume is an estimate based on a percentage of model volume.
+            For accurate values, use a slicer.
+          </p>
+        )}
         <p className="hint">
           Energy cost uses your local rate, printer wattage, and print time.
         </p>
+        {printType === "filament" && (
+          <p className="hint">
+            Filament usage is estimated from STL volume, infill, and density.
+          </p>
+        )}
       </section>
 
       <section className="card library">
@@ -919,9 +1072,33 @@ export default function App() {
 
       <section className="card uploader">
         <div>
-          <h2>Upload STL</h2>
-          <p>Select one or more files. Calculation runs locally.</p>
+          <h2>Input mode</h2>
+          <p>Choose between STL upload or manual estimate.</p>
         </div>
+        <div className="segmented">
+          <button
+            type="button"
+            className={inputMode === "upload" ? "active" : ""}
+            onClick={() => setInputMode("upload")}
+          >
+            Upload STL
+          </button>
+          <button
+            type="button"
+            className={inputMode === "manual" ? "active" : ""}
+            onClick={() => setInputMode("manual")}
+          >
+            Manual estimate
+          </button>
+        </div>
+      </section>
+
+      {inputMode === "upload" ? (
+        <section className="card uploader">
+          <div>
+            <h2>Upload STL</h2>
+            <p>Select one or more files. Calculation runs locally.</p>
+          </div>
         <label className="file-input">
           <input
             type="file"
@@ -939,7 +1116,60 @@ export default function App() {
         >
           Upload to account
         </button>
-      </section>
+        </section>
+      ) : (
+        <section className="card uploader">
+          <div>
+            <h2>Manual estimate</h2>
+            <p>Provide resin usage and print time instead of uploading STL.</p>
+          </div>
+          <div className="form-grid">
+            <label>
+              Project name
+              <input
+                type="text"
+                value={manualName}
+                onChange={(event) => setManualName(event.target.value)}
+              />
+            </label>
+            {printType === "resin" ? (
+              <label>
+                Resin usage (ml)
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={manualResinMl}
+                  onChange={(event) => setManualResinMl(Number(event.target.value))}
+                />
+              </label>
+            ) : (
+              <label>
+                Filament usage (g)
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={manualFilamentGrams}
+                  onChange={(event) =>
+                    setManualFilamentGrams(Number(event.target.value))
+                  }
+                />
+              </label>
+            )}
+            <label>
+              Print time {costMode === "per_project" ? "(project hours)" : "(hours per STL)"}
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={printHours}
+                onChange={(event) => setPrintHours(Number(event.target.value))}
+              />
+            </label>
+          </div>
+        </section>
+      )}
 
       <section className="card preview">
         <div className="preview-header">
@@ -976,31 +1206,41 @@ export default function App() {
           <span>{printer || "Printer not set"}</span>
           <span>{resin || "Resin not set"}</span>
         </div>
-        <div className="metrics">
-          <div>
-            <span>Price per liter</span>
-            <strong>{currencyFormatter.format(pricePerLiter)}</strong>
+        <div className="metrics summary-metrics">
+          <div className="metric-card">
+            <span>Material price</span>
+            <strong>
+              {printType === "resin"
+                ? currencyFormatter.format(pricePerLiter)
+                : currencyFormatter.format(pricePerKg)}
+            </strong>
           </div>
-          <div>
+          <div className="metric-card">
             <span>STL count</span>
             <strong>{results.length}</strong>
           </div>
-          <div>
+          <div className="metric-card">
             <span>Valid items</span>
             <strong>{totals.validItems}</strong>
           </div>
-          <div>
-            <span>Support volume</span>
-            <strong>{numberFormatter.format(totals.totalSupportMl)} ml</strong>
+          <div className="metric-card">
+            <span>
+              {printType === "resin" ? "Support volume" : "Filament usage"}
+            </span>
+            <strong>
+              {printType === "resin"
+                ? `${numberFormatter.format(totals.totalSupportMl)} ml`
+                : `${numberFormatter.format(totals.totalFilamentGrams)} g`}
+            </strong>
           </div>
-          <div>
+          <div className="metric-card">
             <span>Energy cost</span>
             <strong>{currencyFormatter.format(energyCostTotal)}</strong>
             <span className="subtitle">
               {costMode === "per_project" ? "per project" : "per STL"}
             </span>
           </div>
-          <div>
+          <div className="metric-card total">
             <span>Total cost (incl. energy)</span>
             <strong>{currencyFormatter.format(totalCostWithEnergy)}</strong>
           </div>
@@ -1020,8 +1260,8 @@ export default function App() {
           <div className="table-grid">
             <div>File</div>
             <div>Volume (mm³)</div>
-            <div>Volume (ml)</div>
-            <div>Supports (ml)</div>
+            <div>{printType === "resin" ? "Volume (ml)" : "Filament (g)"}</div>
+            <div>{printType === "resin" ? "Supports (ml)" : "Material"}</div>
             <div>Energy</div>
             <div>Cost</div>
             <div>Status</div>
@@ -1036,12 +1276,16 @@ export default function App() {
                 <span>
                   {result.error
                     ? "-"
-                    : numberFormatter.format(result.volumeMl)}
+                    : printType === "resin"
+                      ? numberFormatter.format(result.volumeMl)
+                      : numberFormatter.format(result.filamentGrams)}
                 </span>
                 <span>
                   {result.error
                     ? "-"
-                    : numberFormatter.format(result.supportVolumeMl)}
+                    : printType === "resin"
+                      ? numberFormatter.format(result.supportVolumeMl)
+                      : currencyFormatter.format(result.materialCost)}
                 </span>
                 <span>
                   {result.error
