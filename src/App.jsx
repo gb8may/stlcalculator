@@ -2,7 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { Client, Account, Databases, Storage, ID, Query } from "appwrite";
+import {
+  Client,
+  Account,
+  Databases,
+  Storage,
+  ID,
+  Query,
+  Permission,
+  Role,
+} from "appwrite";
 
 const currencyFormatter = new Intl.NumberFormat("en-CA", {
   style: "currency",
@@ -13,6 +22,62 @@ const numberFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+
+function CustomSelect({ value, onChange, options, placeholder, disabled }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+  const selected = options.find((option) => option.value === value);
+
+  useEffect(() => {
+    function handleClick(event) {
+      if (!containerRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  return (
+    <div
+      className={`custom-select ${disabled ? "is-disabled" : ""}`}
+      ref={containerRef}
+    >
+      <button
+        type="button"
+        className="select-button"
+        onClick={() => !disabled && setOpen((prev) => !prev)}
+        disabled={disabled}
+      >
+        <span>{selected ? selected.label : placeholder}</span>
+        <span className="chevron" />
+      </button>
+      {open && (
+        <div className="select-list">
+          {options.length === 0 ? (
+            <div className="select-empty">No options</div>
+          ) : (
+            options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`select-option ${
+                  option.value === value ? "selected" : ""
+                }`}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                {option.label}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function volumeFromGeometryMm3(geometry) {
   const position = geometry.getAttribute("position");
@@ -96,6 +161,8 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [uploadMessageType, setUploadMessageType] = useState("status");
   const [supportPercent, setSupportPercent] = useState(20);
   const [includeSupports, setIncludeSupports] = useState(true);
   const [costMode, setCostMode] = useState("per_stl");
@@ -524,6 +591,11 @@ export default function App() {
     }
     try {
       if (!appwriteRef.current) return;
+      const permissions = [
+        Permission.read(Role.user(user.$id)),
+        Permission.update(Role.user(user.$id)),
+        Permission.delete(Role.user(user.$id)),
+      ];
       await appwriteRef.current.databases.createDocument(
         appwriteConfig.databaseId,
         appwriteConfig.printersCollectionId,
@@ -532,7 +604,8 @@ export default function App() {
           name: newPrinter.name,
           model: newPrinter.model,
           notes: newPrinter.notes,
-        }
+        },
+        permissions
       );
       setNewPrinter({ name: "", model: "", notes: "" });
       setStatusMessage("Printer saved.");
@@ -555,6 +628,11 @@ export default function App() {
     }
     try {
       if (!appwriteRef.current) return;
+      const permissions = [
+        Permission.read(Role.user(user.$id)),
+        Permission.update(Role.user(user.$id)),
+        Permission.delete(Role.user(user.$id)),
+      ];
       await appwriteRef.current.databases.createDocument(
         appwriteConfig.databaseId,
         appwriteConfig.resinsCollectionId,
@@ -563,7 +641,8 @@ export default function App() {
           brand: newResin.brand,
           model: newResin.model,
           price_per_liter: newResin.pricePerLiter,
-        }
+        },
+        permissions
       );
       setNewResin({ brand: "", model: "", pricePerLiter: 200 });
       setStatusMessage("Resin saved.");
@@ -579,22 +658,40 @@ export default function App() {
   }
 
   async function handleUploadToAccount() {
+    setUploadMessage("");
     if (!user || !appwriteRef.current) {
       setStatusMessage("Sign in to upload files.");
+      setUploadMessageType("error");
+      setUploadMessage("Sign in to upload files.");
       return;
     }
     if (!files.length) {
       setStatusMessage("Select STL files before uploading.");
+      setUploadMessageType("error");
+      setUploadMessage("Select STL files before uploading.");
       return;
     }
     setStatusMessage("");
+    setUploadMessageType("status");
+    setUploadMessage("Uploading files...");
     for (const file of files) {
       try {
+        const filePermissions = [
+          Permission.read(Role.user(user.$id)),
+          Permission.update(Role.user(user.$id)),
+          Permission.delete(Role.user(user.$id)),
+        ];
         const createdFile = await appwriteRef.current.storage.createFile(
           appwriteConfig.bucketId,
           ID.unique(),
-          file
+          file,
+          filePermissions
         );
+        const docPermissions = [
+          Permission.read(Role.user(user.$id)),
+          Permission.update(Role.user(user.$id)),
+          Permission.delete(Role.user(user.$id)),
+        ];
         await appwriteRef.current.databases.createDocument(
           appwriteConfig.databaseId,
           appwriteConfig.uploadsCollectionId,
@@ -603,10 +700,13 @@ export default function App() {
             file_name: file.name,
             file_id: createdFile.$id,
             size_bytes: file.size,
-          }
+          },
+          docPermissions
         );
       } catch (error) {
         setStatusMessage(error.message || "Upload failed.");
+        setUploadMessageType("error");
+        setUploadMessage(error.message || "Upload failed.");
         return;
       }
     }
@@ -618,6 +718,8 @@ export default function App() {
     );
     setUploads(data.documents ?? []);
     setStatusMessage("Files uploaded successfully.");
+    setUploadMessageType("status");
+    setUploadMessage("Files uploaded successfully.");
   }
 
   return (
@@ -752,18 +854,16 @@ export default function App() {
           </label>
           <label>
             Printer from library
-            <select
+            <CustomSelect
               value={printer}
-              onChange={(event) => setPrinter(event.target.value)}
+              onChange={setPrinter}
+              placeholder="Select saved printer"
               disabled={!appwriteReady}
-            >
-              <option value="">Select saved printer</option>
-              {printers.map((item) => (
-                <option key={item.$id} value={`${item.name} ${item.model}`}>
-                  {item.name} · {item.model}
-                </option>
-              ))}
-            </select>
+              options={printers.map((item) => ({
+                value: `${item.name} ${item.model}`,
+                label: `${item.name} · ${item.model}`,
+              }))}
+            />
           </label>
           <label>
             Resin (brand/model)
@@ -776,18 +876,16 @@ export default function App() {
           </label>
           <label>
             Resin from library
-            <select
+            <CustomSelect
               value={selectedResinId}
-              onChange={(event) => setSelectedResinId(event.target.value)}
+              onChange={setSelectedResinId}
+              placeholder="Select saved resin"
               disabled={!appwriteReady || printType !== "resin"}
-            >
-              <option value="">Select saved resin</option>
-              {resins.map((item) => (
-                <option key={item.$id} value={item.$id}>
-                  {item.brand} {item.model}
-                </option>
-              ))}
-            </select>
+              options={resins.map((item) => ({
+                value: item.$id,
+                label: `${item.brand} ${item.model}`,
+              }))}
+            />
           </label>
           <label>
             Resin price per liter (CAD)
@@ -939,11 +1037,13 @@ export default function App() {
         )}
       </section>
 
-      <section className="card library">
-        <div>
-          <h2>Library</h2>
-          <p>Add printers and resins to reuse across projects.</p>
-        </div>
+      <details className="card library" open>
+        <summary>
+          <div>
+            <h2>Library</h2>
+            <p>Add printers and resins to reuse across projects.</p>
+          </div>
+        </summary>
         <div className="library-grid">
           <form onSubmit={handleAddPrinter}>
             <h3>Printers</h3>
@@ -1068,7 +1168,7 @@ export default function App() {
             </ul>
           </form>
         </div>
-      </section>
+      </details>
 
       <section className="card uploader">
         <div>
@@ -1116,6 +1216,11 @@ export default function App() {
         >
           Upload to account
         </button>
+        {uploadMessage && (
+          <p className={uploadMessageType === "error" ? "error" : "status"}>
+            {uploadMessage}
+          </p>
+        )}
         </section>
       ) : (
         <section className="card uploader">
