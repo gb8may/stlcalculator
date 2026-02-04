@@ -170,8 +170,7 @@ export default function App() {
           appwriteRef.current.databases.listDocuments(
             appwriteConfig.databaseId,
             appwriteConfig.uploadsCollectionId,
-            Query.orderDesc("$createdAt"),
-          ],
+            [Query.orderDesc("$createdAt")]
           ),
         ]);
 
