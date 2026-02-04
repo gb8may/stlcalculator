@@ -46,25 +46,22 @@ function volumeFromGeometryMm3(geometry) {
   return Math.abs(volume / 6);
 }
 
-const client = new Client()
-  .setEndpoint(import.meta.env.VITE_APPWRITE_ENDPOINT || "")
-  .setProject(import.meta.env.VITE_APPWRITE_PROJECT_ID || "");
-
-const account = new Account(client);
-const databases = new Databases(client);
-const storage = new Storage(client);
-
-const databaseId = import.meta.env.VITE_APPWRITE_DATABASE_ID || "";
-const printersCollectionId =
-  import.meta.env.VITE_APPWRITE_PRINTERS_COLLECTION_ID || "";
-const resinsCollectionId =
-  import.meta.env.VITE_APPWRITE_RESINS_COLLECTION_ID || "";
-const uploadsCollectionId =
-  import.meta.env.VITE_APPWRITE_UPLOADS_COLLECTION_ID || "";
-const bucketId = import.meta.env.VITE_APPWRITE_BUCKET_ID || "";
+const appwriteConfig = {
+  endpoint: import.meta.env.VITE_APPWRITE_ENDPOINT || "",
+  projectId: import.meta.env.VITE_APPWRITE_PROJECT_ID || "",
+  databaseId: import.meta.env.VITE_APPWRITE_DATABASE_ID || "",
+  printersCollectionId:
+    import.meta.env.VITE_APPWRITE_PRINTERS_COLLECTION_ID || "",
+  resinsCollectionId:
+    import.meta.env.VITE_APPWRITE_RESINS_COLLECTION_ID || "",
+  uploadsCollectionId:
+    import.meta.env.VITE_APPWRITE_UPLOADS_COLLECTION_ID || "",
+  bucketId: import.meta.env.VITE_APPWRITE_BUCKET_ID || "",
+};
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [appwriteReady, setAppwriteReady] = useState(true);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authMode, setAuthMode] = useState("signin");
@@ -96,11 +93,50 @@ export default function App() {
   const [previewGeometry, setPreviewGeometry] = useState(null);
   const [previewError, setPreviewError] = useState("");
   const previewRef = useRef(null);
+  const appwriteRef = useRef(null);
+
+  useEffect(() => {
+    const missing = [];
+    if (!appwriteConfig.endpoint) missing.push("VITE_APPWRITE_ENDPOINT");
+    if (!appwriteConfig.projectId) missing.push("VITE_APPWRITE_PROJECT_ID");
+    if (!appwriteConfig.databaseId) missing.push("VITE_APPWRITE_DATABASE_ID");
+    if (!appwriteConfig.printersCollectionId)
+      missing.push("VITE_APPWRITE_PRINTERS_COLLECTION_ID");
+    if (!appwriteConfig.resinsCollectionId)
+      missing.push("VITE_APPWRITE_RESINS_COLLECTION_ID");
+    if (!appwriteConfig.uploadsCollectionId)
+      missing.push("VITE_APPWRITE_UPLOADS_COLLECTION_ID");
+    if (!appwriteConfig.bucketId) missing.push("VITE_APPWRITE_BUCKET_ID");
+
+    if (missing.length > 0) {
+      setAppwriteReady(false);
+      setStatusMessage(
+        `Missing Appwrite env vars: ${missing.join(", ")}`
+      );
+      return;
+    }
+
+    try {
+      const client = new Client()
+        .setEndpoint(appwriteConfig.endpoint)
+        .setProject(appwriteConfig.projectId);
+      appwriteRef.current = {
+        account: new Account(client),
+        databases: new Databases(client),
+        storage: new Storage(client),
+      };
+      setAppwriteReady(true);
+    } catch (error) {
+      setAppwriteReady(false);
+      setStatusMessage(error.message || "Invalid Appwrite configuration.");
+    }
+  }, []);
 
   useEffect(() => {
     async function getUser() {
+      if (!appwriteRef.current) return;
       try {
-        const accountInfo = await account.get();
+        const accountInfo = await appwriteRef.current.account.get();
         setUser(accountInfo);
       } catch (error) {
         setUser(null);
@@ -111,7 +147,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !appwriteRef.current) {
       setPrinters([]);
       setResins([]);
       setUploads([]);
@@ -121,15 +157,22 @@ export default function App() {
     async function loadData() {
       try {
         const [printersData, resinsData, uploadsData] = await Promise.all([
-          databases.listDocuments(databaseId, printersCollectionId, [
+          appwriteRef.current.databases.listDocuments(
+            appwriteConfig.databaseId,
+            appwriteConfig.printersCollectionId,
+            [Query.orderDesc("$createdAt")]
+          ),
+          appwriteRef.current.databases.listDocuments(
+            appwriteConfig.databaseId,
+            appwriteConfig.resinsCollectionId,
+            [Query.orderDesc("$createdAt")]
+          ),
+          appwriteRef.current.databases.listDocuments(
+            appwriteConfig.databaseId,
+            appwriteConfig.uploadsCollectionId,
             Query.orderDesc("$createdAt"),
-          ]),
-          databases.listDocuments(databaseId, resinsCollectionId, [
-            Query.orderDesc("$createdAt"),
-          ]),
-          databases.listDocuments(databaseId, uploadsCollectionId, [
-            Query.orderDesc("$createdAt"),
-          ]),
+          ],
+          ),
         ]);
 
         setPrinters(printersData.documents ?? []);
@@ -336,8 +379,12 @@ export default function App() {
 
     if (authMode === "signin") {
       try {
-        await account.createEmailPasswordSession(authEmail, authPassword);
-        const accountInfo = await account.get();
+        if (!appwriteRef.current) return;
+        await appwriteRef.current.account.createEmailPasswordSession(
+          authEmail,
+          authPassword
+        );
+        const accountInfo = await appwriteRef.current.account.get();
         setUser(accountInfo);
       } catch (error) {
         setStatusMessage(error.message || "Could not sign in.");
@@ -346,9 +393,17 @@ export default function App() {
     }
 
     try {
-      await account.create(ID.unique(), authEmail, authPassword);
-      await account.createEmailPasswordSession(authEmail, authPassword);
-      const accountInfo = await account.get();
+      if (!appwriteRef.current) return;
+      await appwriteRef.current.account.create(
+        ID.unique(),
+        authEmail,
+        authPassword
+      );
+      await appwriteRef.current.account.createEmailPasswordSession(
+        authEmail,
+        authPassword
+      );
+      const accountInfo = await appwriteRef.current.account.get();
       setUser(accountInfo);
     } catch (error) {
       setStatusMessage(error.message || "Could not create account.");
@@ -356,7 +411,8 @@ export default function App() {
   }
 
   async function handleSignOut() {
-    await account.deleteSession("current");
+    if (!appwriteRef.current) return;
+    await appwriteRef.current.account.deleteSession("current");
     setUser(null);
     setStatusMessage("");
   }
@@ -368,9 +424,10 @@ export default function App() {
       return;
     }
     try {
-      await databases.createDocument(
-        databaseId,
-        printersCollectionId,
+      if (!appwriteRef.current) return;
+      await appwriteRef.current.databases.createDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.printersCollectionId,
         ID.unique(),
         {
           name: newPrinter.name,
@@ -380,9 +437,9 @@ export default function App() {
       );
       setNewPrinter({ name: "", model: "", notes: "" });
       setStatusMessage("Printer saved.");
-      const data = await databases.listDocuments(
-        databaseId,
-        printersCollectionId,
+      const data = await appwriteRef.current.databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.printersCollectionId,
         [Query.orderDesc("$createdAt")]
       );
       setPrinters(data.documents ?? []);
@@ -398,9 +455,10 @@ export default function App() {
       return;
     }
     try {
-      await databases.createDocument(
-        databaseId,
-        resinsCollectionId,
+      if (!appwriteRef.current) return;
+      await appwriteRef.current.databases.createDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.resinsCollectionId,
         ID.unique(),
         {
           brand: newResin.brand,
@@ -410,9 +468,9 @@ export default function App() {
       );
       setNewResin({ brand: "", model: "", pricePerLiter: 200 });
       setStatusMessage("Resin saved.");
-      const data = await databases.listDocuments(
-        databaseId,
-        resinsCollectionId,
+      const data = await appwriteRef.current.databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.resinsCollectionId,
         [Query.orderDesc("$createdAt")]
       );
       setResins(data.documents ?? []);
@@ -422,7 +480,7 @@ export default function App() {
   }
 
   async function handleUploadToAccount() {
-    if (!user) {
+    if (!user || !appwriteRef.current) {
       setStatusMessage("Sign in to upload files.");
       return;
     }
@@ -433,14 +491,14 @@ export default function App() {
     setStatusMessage("");
     for (const file of files) {
       try {
-        const createdFile = await storage.createFile(
-          bucketId,
+        const createdFile = await appwriteRef.current.storage.createFile(
+          appwriteConfig.bucketId,
           ID.unique(),
           file
         );
-        await databases.createDocument(
-          databaseId,
-          uploadsCollectionId,
+        await appwriteRef.current.databases.createDocument(
+          appwriteConfig.databaseId,
+          appwriteConfig.uploadsCollectionId,
           ID.unique(),
           {
             file_name: file.name,
@@ -454,9 +512,9 @@ export default function App() {
       }
     }
 
-    const data = await databases.listDocuments(
-      databaseId,
-      uploadsCollectionId,
+    const data = await appwriteRef.current.databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.uploadsCollectionId,
       [Query.orderDesc("$createdAt")]
     );
     setUploads(data.documents ?? []);
@@ -498,6 +556,12 @@ export default function App() {
             </button>
           )}
         </div>
+        {!appwriteReady && (
+          <p className="error">
+            Appwrite is not configured. Check your environment variables and
+            redeploy.
+          </p>
+        )}
         {user ? (
           <p className="status">Signed in as {user.email}</p>
         ) : (
@@ -578,6 +642,7 @@ export default function App() {
             <select
               value={selectedResinId}
               onChange={(event) => setSelectedResinId(event.target.value)}
+              disabled={!appwriteReady}
             >
               <option value="">Select saved resin</option>
               {resins.map((item) => (
@@ -701,7 +766,11 @@ export default function App() {
                 placeholder="Build plate, settings, etc."
               />
             </label>
-            <button type="submit" className="primary" disabled={!user}>
+            <button
+              type="submit"
+              className="primary"
+              disabled={!user || !appwriteReady}
+            >
               Save printer
             </button>
             {!user && <p className="hint">Sign in to save printers.</p>}
@@ -758,7 +827,11 @@ export default function App() {
                 }
               />
             </label>
-            <button type="submit" className="primary" disabled={!user}>
+            <button
+              type="submit"
+              className="primary"
+              disabled={!user || !appwriteReady}
+            >
               Save resin
             </button>
             {!user && <p className="hint">Sign in to save resins.</p>}
@@ -792,7 +865,7 @@ export default function App() {
           type="button"
           className="primary"
           onClick={handleUploadToAccount}
-          disabled={!user || !files.length}
+          disabled={!user || !files.length || !appwriteReady}
         >
           Upload to account
         </button>

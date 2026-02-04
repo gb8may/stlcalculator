@@ -261,6 +261,10 @@ label.toggle input {
   color: #f87171;
 }
 
+.error a {
+  color: inherit;
+}
+
 .empty {
   color: #94a3b8;
 }
