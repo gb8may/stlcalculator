@@ -865,84 +865,93 @@ export default function App() {
               }))}
             />
           </label>
-          <label>
-            Resin (brand/model)
-            <input
-              type="text"
-              value={resin}
-              placeholder="e.g. Anycubic Standard+"
-              onChange={(event) => setResin(event.target.value)}
-            />
-          </label>
-          <label>
-            Resin from library
-            <CustomSelect
-              value={selectedResinId}
-              onChange={setSelectedResinId}
-              placeholder="Select saved resin"
-              disabled={!appwriteReady || printType !== "resin"}
-              options={resins.map((item) => ({
-                value: item.$id,
-                label: `${item.brand} ${item.model}`,
-              }))}
-            />
-          </label>
-          <label>
-            Resin price per liter (CAD)
-            <input
-              type="number"
-              min="0"
-              step="10"
-              value={pricePerLiter}
-              onChange={(event) => setPricePerLiter(Number(event.target.value))}
-              disabled={printType !== "resin"}
-            />
-          </label>
-          <label>
-            Filament price per kg (CAD)
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={pricePerKg}
-              onChange={(event) => setPricePerKg(Number(event.target.value))}
-              disabled={printType !== "filament"}
-            />
-          </label>
-          <label>
-            Filament density (g/cm³)
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={filamentDensity}
-              onChange={(event) => setFilamentDensity(Number(event.target.value))}
-              disabled={printType !== "filament"}
-            />
-          </label>
-          <label>
-            Infill (%)
-            <input
-              type="number"
-              min="0"
-              max="100"
-              step="1"
-              value={infillPercent}
-              onChange={(event) => setInfillPercent(Number(event.target.value))}
-              disabled={printType !== "filament"}
-            />
-          </label>
-          <label>
-            Shell factor
-            <input
-              type="number"
-              min="0"
-              step="0.05"
-              value={shellFactor}
-              onChange={(event) => setShellFactor(Number(event.target.value))}
-              disabled={printType !== "filament"}
-            />
-          </label>
+          {printType === "resin" && (
+            <>
+              <label>
+                Resin (brand/model)
+                <input
+                  type="text"
+                  value={resin}
+                  placeholder="e.g. Anycubic Standard+"
+                  onChange={(event) => setResin(event.target.value)}
+                />
+              </label>
+              <label>
+                Resin from library
+                <CustomSelect
+                  value={selectedResinId}
+                  onChange={setSelectedResinId}
+                  placeholder="Select saved resin"
+                  disabled={!appwriteReady}
+                  options={resins.map((item) => ({
+                    value: item.$id,
+                    label: `${item.brand} ${item.model}`,
+                  }))}
+                />
+              </label>
+              <label>
+                Resin price per liter (CAD)
+                <input
+                  type="number"
+                  min="0"
+                  step="10"
+                  value={pricePerLiter}
+                  onChange={(event) =>
+                    setPricePerLiter(Number(event.target.value))
+                  }
+                />
+              </label>
+            </>
+          )}
+          {printType === "filament" && (
+            <>
+              <label>
+                Filament price per kg (CAD)
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={pricePerKg}
+                  onChange={(event) => setPricePerKg(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                Filament density (g/cm³)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={filamentDensity}
+                  onChange={(event) =>
+                    setFilamentDensity(Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Infill (%)
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={infillPercent}
+                  onChange={(event) =>
+                    setInfillPercent(Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Shell factor
+                <input
+                  type="number"
+                  min="0"
+                  step="0.05"
+                  value={shellFactor}
+                  onChange={(event) => setShellFactor(Number(event.target.value))}
+                />
+              </label>
+            </>
+          )}
           <label>
             Cost mode
             <div className="segmented">
@@ -992,26 +1001,32 @@ export default function App() {
               onChange={(event) => setPrintHours(Number(event.target.value))}
             />
           </label>
-          <label>
-            Support estimate ({supportPercent}%)
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={supportPercent}
-              onChange={(event) => setSupportPercent(Number(event.target.value))}
-              disabled={printType !== "resin"}
-            />
-          </label>
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={includeSupports}
-              onChange={(event) => setIncludeSupports(event.target.checked)}
-              disabled={printType !== "resin"}
-            />
-            Include supports in cost
-          </label>
+          {printType === "resin" && (
+            <>
+              <label>
+                Support estimate ({supportPercent}%)
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={supportPercent}
+                  onChange={(event) =>
+                    setSupportPercent(Number(event.target.value))
+                  }
+                />
+              </label>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={includeSupports}
+                  onChange={(event) =>
+                    setIncludeSupports(event.target.checked)
+                  }
+                />
+                Include supports in cost
+              </label>
+            </>
+          )}
           <label className="toggle">
             <input
               type="checkbox"
@@ -1309,7 +1324,11 @@ export default function App() {
         <div className="badges">
           <span>{location || "Location not set"}</span>
           <span>{printer || "Printer not set"}</span>
-          <span>{resin || "Resin not set"}</span>
+          <span>
+            {printType === "resin"
+              ? resin || "Resin not set"
+              : "Filament printing"}
+          </span>
         </div>
         <div className="metrics summary-metrics">
           <div className="metric-card">
